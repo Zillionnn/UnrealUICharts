@@ -83,6 +83,9 @@ int32 UYtChartWidget::NativePaint(const FPaintArgs& Args, const FGeometry& Geo, 
 	FSlateRect Area(Left + Style.Pad.Left, Top + Style.Pad.Top, Right - Style.Pad.Right, Bot - Style.Pad.Bottom);
 	if (Area.GetSize().X <= 0 || Area.GetSize().Y <= 0) return Layer + 1;
 
+	float ALeft = Area.Left, AWidth = Area.GetSize().X, AHeight = Area.GetSize().Y;
+	FVector2D ChartC((Area.Left + Area.Right) * 0.5f, (Area.Top + Area.Bottom) * 0.5f);
+
 	switch (Type)
 	{
 	case EYtChartType::Line:
@@ -95,15 +98,11 @@ int32 UYtChartWidget::NativePaint(const FPaintArgs& Args, const FGeometry& Geo, 
 		break;
 	case EYtChartType::Pie:
 	case EYtChartType::Doughnut:
-	{	float R = FMath::Min(Area.GetSize().X, Area.GetSize().Y) * 0.45f;
-		FVector2D C((Area.Left + Area.Right) * 0.5f, (Area.Top + Area.Bottom) * 0.5f);
-		DrawPie(Geo, Out, Layer, C, R);
-	}	break;
+		DrawPie(Geo, Out, Layer, ChartC, FMath::Min(AWidth, AHeight) * 0.45f);
+		break;
 	case EYtChartType::Radar:
-	{	float R = FMath::Min(Area.GetSize().X, Area.GetSize().Y) * 0.4f;
-		FVector2D C((Area.Left + Area.Right) * 0.5f, (Area.Top + Area.Bottom) * 0.5f);
-		DrawRadar(Geo, Out, Layer, C, R);
-	}	break;
+		DrawRadar(Geo, Out, Layer, ChartC, FMath::Min(AWidth, AHeight) * 0.4f);
+		break;
 	case EYtChartType::Scatter:
 		DrawGrid(Geo, Out, Layer, Area, GetMin(), GetMax());
 		DrawScatter(Geo, Out, Layer, Area);
@@ -112,8 +111,34 @@ int32 UYtChartWidget::NativePaint(const FPaintArgs& Args, const FGeometry& Geo, 
 
 	if (bHover && Style.bTooltip)
 	{
-		FString Txt = FString::Printf(TEXT("(%.0f, %.0f)"), MousePos.X, MousePos.Y);
-		DrawTooltip(Geo, Out, Layer, MousePos, Txt);
+		int32 N = Labels.Num();
+		int32 Idx = -1;
+		if (Type == EYtChartType::Line || Type == EYtChartType::Bar || Type == EYtChartType::Scatter)
+		{
+			if (N > 1)
+				Idx = FMath::Clamp(FMath::RoundToInt((MousePos.X - ALeft) / AWidth * (N - 1)), 0, N - 1);
+		}
+		else if (Type == EYtChartType::Pie || Type == EYtChartType::Doughnut || Type == EYtChartType::Radar)
+		{
+			if (N > 0)
+			{
+				float A = FMath::Atan2(MousePos.Y - ChartC.Y, MousePos.X - ChartC.X) + PI / 2.0f;
+				if (A < 0) A += 2.0f * PI;
+				Idx = FMath::Clamp(FMath::FloorToInt(A / (2.0f * PI) * N), 0, N - 1);
+			}
+		}
+		if (Idx >= 0)
+		{
+			FString Txt;
+			if (Labels.IsValidIndex(Idx)) Txt = Labels[Idx];
+			for (int32 si = 0; si < Series.Num(); ++si)
+			{
+				if (!Series[si].bVisible || !Series[si].Values.IsValidIndex(Idx)) continue;
+				Txt += FString::Printf(TEXT("\n%s: %.1f"), *Series[si].Name.ToString(), Series[si].Values[Idx]);
+			}
+			if (!Txt.IsEmpty())
+				DrawTooltip(Geo, Out, Layer, MousePos, Txt);
+		}
 	}
 	return Layer + 1;
 }
